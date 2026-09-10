@@ -1,4 +1,4 @@
-import { DragEvent, KeyboardEvent, useMemo, useState } from 'react'
+import { DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import foodsJson from './data/foods.json'
 import type { Food, MacroNutrients, PlateItem, Portion } from './types'
 
@@ -29,6 +29,8 @@ const calculateMeal = (items: PlateItem[]): MacroNutrients =>
   )
 
 const rounded = (value: number) => Math.round(value)
+const categorySlug = (category: string) => category.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+const categoryLabel = (category: string) => category.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
 
 type Verdict = { tone: 'balanced' | 'nearly' | 'adjust'; title: string; message: string }
 
@@ -79,10 +81,27 @@ export default function App() {
   const [previous, setPrevious] = useState<MacroNutrients | null>(null)
   const [liveMessage, setLiveMessage] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const foodMenuRef = useRef<HTMLDivElement>(null)
 
   const total = useMemo(() => calculateMeal(plate), [plate])
-  const activeFoods = foods.filter((food) => food.category === activeCategory)
   const chosenPortion = (food: Food) => food.portions?.find((portion) => portion.id === portions[food.id]) ?? defaultPortion(food)
+
+  useEffect(() => {
+    const anchor = document.getElementById(`category-jump-${categorySlug(activeCategory)}`)
+    const tabs = anchor?.parentElement
+    if (!anchor || !tabs) return
+
+    const leftEdge = anchor.offsetLeft
+    const rightEdge = leftEdge + anchor.offsetWidth
+    const visibleLeft = tabs.scrollLeft
+    const visibleRight = visibleLeft + tabs.clientWidth
+    if (leftEdge < visibleLeft || rightEdge > visibleRight) {
+      tabs.scrollTo({
+        left: leftEdge < visibleLeft ? leftEdge : rightEdge - tabs.clientWidth,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      })
+    }
+  }, [activeCategory])
 
   const addFood = (food: Food, portion = chosenPortion(food)) => {
     setPlate((current) => [...current, { instanceId: `${food.id}-${crypto.randomUUID()}`, food, portion }])
@@ -132,13 +151,44 @@ export default function App() {
 
   const verdict = assessMeal(total)
 
-  const moveTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+  const jumpToCategory = (category: string) => {
+    const menu = foodMenuRef.current
+    const section = document.getElementById(`food-section-${categorySlug(category)}`)
+    const tabs = menu?.querySelector<HTMLElement>('.tabs')
+    if (!menu || !section) return
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    menu.scrollTo({
+      top: section.offsetTop - (tabs?.offsetHeight ?? 0) - 8,
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    })
+    setActiveCategory(category)
+  }
+
+  const syncCategoryToScroll = () => {
+    const menu = foodMenuRef.current
+    const tabs = menu?.querySelector<HTMLElement>('.tabs')
+    if (!menu) return
+
+    const marker = menu.scrollTop + (tabs?.offsetHeight ?? 0) + 28
+    let visibleCategory = categories[0] ?? ''
+    for (const category of categories) {
+      const section = document.getElementById(`food-section-${categorySlug(category)}`)
+      if (section && section.offsetTop <= marker) visibleCategory = category
+    }
+    if (menu.scrollTop + menu.clientHeight >= menu.scrollHeight - 2) {
+      visibleCategory = categories[categories.length - 1] ?? visibleCategory
+    }
+    setActiveCategory(visibleCategory)
+  }
+
+  const moveTab = (event: KeyboardEvent<HTMLAnchorElement>, index: number) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? categories.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + categories.length) % categories.length
     const next = categories[nextIndex]
-    setActiveCategory(next)
-    document.getElementById(`category-tab-${next}`)?.focus()
+    jumpToCategory(next)
+    document.getElementById(`category-jump-${categorySlug(next)}`)?.focus()
   }
 
   return <div className="app-shell">
@@ -158,17 +208,24 @@ export default function App() {
       <div className="game-layout">
         <aside className="food-browser" aria-label="Food browser">
           <div className="section-heading"><p className="eyebrow">01 · Choose</p><h2>Food shelf</h2></div>
-          <div className="tabs" role="tablist" aria-label="Food categories">
-            {categories.map((category, index) => <button key={category} id={`category-tab-${category}`} role="tab" aria-selected={category === activeCategory} aria-controls="food-tabpanel" tabIndex={category === activeCategory ? 0 : -1} className={category === activeCategory ? 'active' : ''} onKeyDown={(event) => moveTab(event, index)} onClick={() => setActiveCategory(category)} type="button">{category}</button>)}
-          </div>
-          <div className="food-list" id="food-tabpanel" role="tabpanel" aria-label={`${activeCategory} foods`}>
-            {activeFoods.map((food) => <article className="food-tile" key={food.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/food-id', food.id); setIsDragging(true) }} onDragEnd={() => setIsDragging(false)}>
-              <div className="food-placeholder" aria-hidden="true">{food.placeholder ?? 'Food image'}</div>
-              <div className="food-copy"><h3>{food.name}</h3><p>{food.preparation ?? food.serving}</p>
-                {food.portions && food.portions.length > 1 && <label className="select-label">Portion<select value={chosenPortion(food).id} onChange={(event) => setPortions((current) => ({ ...current, [food.id]: event.target.value }))}>{food.portions.map((portion) => <option key={portion.id} value={portion.id}>{portion.label}</option>)}</select></label>}
-              </div>
-              <button className="add-button" onClick={() => addFood(food)} type="button" aria-label={`Add ${food.name} to plate`}>Add<span aria-hidden="true"> +</span></button>
-            </article>)}
+          <div className="food-menu" ref={foodMenuRef} onScroll={syncCategoryToScroll}>
+            <nav className="tabs" aria-label="Jump to a food category">
+              {categories.map((category, index) => <a key={category} id={`category-jump-${categorySlug(category)}`} href={`#food-section-${categorySlug(category)}`} aria-current={category === activeCategory ? 'location' : undefined} className={category === activeCategory ? 'active' : ''} onKeyDown={(event) => moveTab(event, index)} onClick={(event) => { event.preventDefault(); jumpToCategory(category) }}>{categoryLabel(category)}</a>)}
+            </nav>
+            <div className="food-list" aria-label="All food categories">
+              {categories.map((category) => <section className="category-section" id={`food-section-${categorySlug(category)}`} aria-labelledby={`food-heading-${categorySlug(category)}`} key={category}>
+                <h3 className="category-heading" id={`food-heading-${categorySlug(category)}`}>{categoryLabel(category)}</h3>
+                <div className="category-foods">
+                  {foods.filter((food) => food.category === category).map((food) => <article className="food-tile" key={food.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/food-id', food.id); setIsDragging(true) }} onDragEnd={() => setIsDragging(false)}>
+                    <div className="food-placeholder" aria-hidden="true">{food.placeholder ?? 'Food image'}</div>
+                    <div className="food-copy"><h4>{food.name}</h4><p>{food.preparation ?? food.serving}</p>
+                      {food.portions && food.portions.length > 1 && <label className="select-label">Portion<select value={chosenPortion(food).id} onChange={(event) => setPortions((current) => ({ ...current, [food.id]: event.target.value }))}>{food.portions.map((portion) => <option key={portion.id} value={portion.id}>{portion.label}</option>)}</select></label>}
+                    </div>
+                    <button className="add-button" onClick={() => addFood(food)} type="button" aria-label={`Add ${food.name} to plate`}>Add<span aria-hidden="true"> +</span></button>
+                  </article>)}
+                </div>
+              </section>)}
+            </div>
           </div>
         </aside>
 
