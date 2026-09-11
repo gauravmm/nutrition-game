@@ -118,6 +118,7 @@ export default function App() {
   const [liveMessage, setLiveMessage] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const foodMenuRef = useRef<HTMLDivElement>(null)
+  const foodTabsRef = useRef<HTMLElement>(null)
 
   const total = useMemo(() => calculateMeal(plate), [plate])
   const chosenPortion = (food: Food) => food.portions?.find((portion) => portion.id === portions[food.id]) ?? defaultPortion(food)
@@ -190,7 +191,7 @@ export default function App() {
   const jumpToCategory = (category: string) => {
     const menu = foodMenuRef.current
     const section = document.getElementById(`food-section-${categorySlug(category)}`)
-    const tabs = menu?.querySelector<HTMLElement>('.tabs')
+    const tabs = foodTabsRef.current
     if (!menu || !section) return
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -203,7 +204,7 @@ export default function App() {
 
   const syncCategoryToScroll = () => {
     const menu = foodMenuRef.current
-    const tabs = menu?.querySelector<HTMLElement>('.tabs')
+    const tabs = foodTabsRef.current
     if (!menu) return
 
     const marker = menu.scrollTop + (tabs?.offsetHeight ?? 0) + 28
@@ -238,10 +239,10 @@ export default function App() {
       <div className="game-layout">
         <aside className="food-browser" aria-label="Food browser">
           <div className="section-heading"><p className="eyebrow">01 · Choose</p><h2>Food shelf</h2></div>
+          <nav className="tabs" ref={foodTabsRef} aria-label="Jump to a food category">
+            {categories.map((category, index) => <a key={category} id={`category-jump-${categorySlug(category)}`} href={`#food-section-${categorySlug(category)}`} aria-current={category === activeCategory ? 'location' : undefined} className={category === activeCategory ? 'active' : ''} onKeyDown={(event) => moveTab(event, index)} onClick={(event) => { event.preventDefault(); jumpToCategory(category) }}>{categoryLabel(category)}</a>)}
+          </nav>
           <div className="food-menu" ref={foodMenuRef} onScroll={syncCategoryToScroll}>
-            <nav className="tabs" aria-label="Jump to a food category">
-              {categories.map((category, index) => <a key={category} id={`category-jump-${categorySlug(category)}`} href={`#food-section-${categorySlug(category)}`} aria-current={category === activeCategory ? 'location' : undefined} className={category === activeCategory ? 'active' : ''} onKeyDown={(event) => moveTab(event, index)} onClick={(event) => { event.preventDefault(); jumpToCategory(category) }}>{categoryLabel(category)}</a>)}
-            </nav>
             <div className="food-list" aria-label="All food categories">
               {categories.map((category) => <section className="category-section" id={`food-section-${categorySlug(category)}`} aria-labelledby={`food-heading-${categorySlug(category)}`} key={category}>
                 <h3 className="category-heading" id={`food-heading-${categorySlug(category)}`}>{categoryLabel(category)}</h3>
@@ -286,6 +287,5 @@ export default function App() {
       </div>
     </main>
     <p className="sr-only" aria-live="polite">{liveMessage}</p>
-    <footer>This is a learning activity, not medical advice. Nutrition values vary by recipe and serving.</footer>
   </div>
 }
