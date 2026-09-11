@@ -125,7 +125,7 @@ export default function App() {
 
   useEffect(() => {
     const anchor = document.getElementById(`category-jump-${categorySlug(activeCategory)}`)
-    const tabs = anchor?.parentElement
+    const tabs = foodTabsRef.current
     if (!anchor || !tabs) return
 
     const leftEdge = anchor.offsetLeft
@@ -191,12 +191,11 @@ export default function App() {
   const jumpToCategory = (category: string) => {
     const menu = foodMenuRef.current
     const section = document.getElementById(`food-section-${categorySlug(category)}`)
-    const tabs = foodTabsRef.current
     if (!menu || !section) return
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     menu.scrollTo({
-      top: section.offsetTop - (tabs?.offsetHeight ?? 0) - 8,
+      top: section.offsetTop - 8,
       behavior: reduceMotion ? 'auto' : 'smooth',
     })
     setActiveCategory(category)
@@ -204,10 +203,9 @@ export default function App() {
 
   const syncCategoryToScroll = () => {
     const menu = foodMenuRef.current
-    const tabs = foodTabsRef.current
     if (!menu) return
 
-    const marker = menu.scrollTop + (tabs?.offsetHeight ?? 0) + 28
+    const marker = menu.scrollTop + 28
     let visibleCategory = categories[0] ?? ''
     for (const category of categories) {
       const section = document.getElementById(`food-section-${categorySlug(category)}`)
