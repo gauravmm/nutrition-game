@@ -28,30 +28,45 @@ const calculateMeal = (items: PlateItem[]): MacroNutrients =>
     { calories: 0, carbs: 0, protein: 0, fat: 0 },
   )
 
+const calculateNutrient = (items: PlateItem[], nutrient: string): number | null => {
+  let total = 0
+  for (const item of items) {
+    const value = item.food.micronutrients[nutrient]
+    if (value === null || value === undefined) return null
+    total += value * item.portion.multiplier
+  }
+  return total
+}
+
 const rounded = (value: number) => Math.round(value)
 const categorySlug = (category: string) => category.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
 const categoryLabel = (category: string) => category.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
 
-type Verdict = { tone: 'balanced' | 'nearly' | 'adjust'; title: string; message: string }
+type Verdict = {
+  tone: 'balanced' | 'nearly' | 'adjust'
+  title: string
+  message: string
+  findings: string[]
+}
 
 function assessMeal(total: MacroNutrients): Verdict {
   const macroEnergy = total.carbs * 4 + total.protein * 4 + total.fat * 9
-  if (macroEnergy === 0) return { tone: 'adjust', title: 'Choose a few foods first', message: '' }
+  if (macroEnergy === 0) return { tone: 'adjust', title: 'Choose a few foods first', message: '', findings: [] }
   const proteinShare = (total.protein * 4 * 100) / macroEnergy
   const fatShare = (total.fat * 9 * 100) / macroEnergy
   const carbsShare = (total.carbs * 4 * 100) / macroEnergy
-  const misses = [
-    proteinShare < 15 || proteinShare > 30,
-    fatShare < 20 || fatShare > 35,
-    carbsShare < 45 || carbsShare > 65,
-  ].filter(Boolean).length
-  if (misses === 0) {
-    return { tone: 'balanced', title: 'Balanced for this activity', message: 'Your macronutrient mix sits in this activity’s guide ranges. One meal is only one part of an overall diet.' }
+  const findings = [
+    proteinShare < 20 ? 'Protein is below the 20–30% guide range. Consider adding a protein source.' : proteinShare > 30 ? 'Protein is above the 20–30% guide range. Try varying the mix of foods on your plate.' : null,
+    fatShare < 20 ? 'Fat is below the 20–30% guide range. Try varying the mix of foods on your plate.' : fatShare > 30 ? 'Fat is above the 20–30% guide range. Consider a smaller portion of a higher-fat item.' : null,
+    carbsShare < 45 ? 'Carbohydrate is below the 45–65% guide range. Try varying the mix of foods on your plate.' : carbsShare > 65 ? 'Carbohydrate is above the 45–65% guide range. Try varying the mix of foods on your plate.' : null,
+  ].filter((finding): finding is string => finding !== null)
+  if (findings.length === 0) {
+    return { tone: 'balanced', title: 'Balanced for this activity', message: 'Your macronutrient mix sits in this activity’s guide ranges. One meal is only one part of an overall diet.', findings }
   }
-  if (misses === 1) {
-    return { tone: 'nearly', title: 'Close — try one small change', message: `${proteinShare < 15 ? 'Consider adding a protein source.' : fatShare > 35 ? 'Consider a smaller portion of a higher-fat item.' : 'Try varying the mix of foods on your plate.'} One meal is only one part of an overall diet.` }
+  if (findings.length === 1) {
+    return { tone: 'nearly', title: 'Close — try one small change', message: 'One meal is only one part of an overall diet.', findings }
   }
-  return { tone: 'adjust', title: 'Try adjusting your meal', message: `${proteinShare < 15 ? 'This meal is relatively low in protein. Try adding a protein source and check again.' : 'Try changing a portion or adding a different kind of food, then see what changes.'} One meal is only one part of an overall diet.` }
+  return { tone: 'adjust', title: 'Try adjusting your meal', message: 'Try changing a portion or adding a different kind of food, then check again. One meal is only one part of an overall diet.', findings }
 }
 
 function MacroBar({ total }: { total: MacroNutrients }) {
@@ -69,6 +84,27 @@ function MacroBar({ total }: { total: MacroNutrients }) {
       {macros.map((macro) => <div key={macro.key}><i className={`macro-${macro.key}`} aria-hidden="true" /><dt>{macro.label}</dt><dd>{rounded(macro.grams)} g · {rounded((macro.energy / macroEnergy) * 100)}% of energy</dd></div>)}
     </dl>
   </>
+}
+
+function NutrientTracker({ items, totalFat }: { items: PlateItem[]; totalFat: number }) {
+  const saturatedFat = calculateNutrient(items, 'saturatedFat')
+  const sodium = calculateNutrient(items, 'sodium')
+  const saturatedFatShare = saturatedFat === null ? null : totalFat > 0 ? (saturatedFat * 100) / totalFat : 0
+  const sodiumDailyShare = sodium === null ? null : (sodium * 100) / 2000
+
+  return <section className="nutrient-tracker" aria-labelledby="nutrient-tracker-title">
+    <div className="tracker-heading"><h3 id="nutrient-tracker-title">Nutrition guide tracker</h3><span>For this meal</span></div>
+    <dl>
+      <div className={saturatedFatShare !== null && saturatedFatShare > (100 / 3) ? 'is-over' : ''}>
+        <dt>Saturated fat</dt>
+        <dd>{saturatedFat === null || saturatedFatShare === null ? <><strong>Unavailable</strong><span>Data is missing for a selected food</span></> : <><strong>{saturatedFat.toFixed(1)} g</strong><span>{rounded(saturatedFatShare)}% of total fat</span><em>{saturatedFatShare > (100 / 3) ? 'Above ⅓ of total fat' : 'Within ⅓ of total fat'}</em></>}</dd>
+      </div>
+      <div className={sodiumDailyShare !== null && sodiumDailyShare > 100 ? 'is-over' : ''}>
+        <dt>Sodium</dt>
+        <dd>{sodium === null || sodiumDailyShare === null ? <><strong>Unavailable</strong><span>Data is missing for a selected food</span></> : <><strong>{rounded(sodium)} mg</strong><span>{rounded(sodiumDailyShare)}% of 2,000 mg daily reference</span><em>{sodiumDailyShare > 100 ? 'Above daily reference' : 'Within daily reference'}</em></>}</dd>
+      </div>
+    </dl>
+  </section>
 }
 
 export default function App() {
@@ -194,17 +230,11 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="./" aria-label="Meal Mixer home"><span className="brand-mark">M</span>Meal Mixer</a>
-      <p>Build a meal with your intuition. The numbers stay hidden until you check.</p>
+      <p>What will you put together?</p>
       <button className="quiet-button" onClick={startOver} type="button">Start over</button>
     </header>
 
     <main>
-      <section className="intro" aria-labelledby="page-title">
-        <p className="eyebrow">Nutrition detective</p>
-        <h1 id="page-title">What will you put together?</h1>
-        <p>Choose foods, adjust portions, and place them on your plate. There’s no perfect meal—only a chance to notice what changes.</p>
-      </section>
-
       <div className="game-layout">
         <aside className="food-browser" aria-label="Food browser">
           <div className="section-heading"><p className="eyebrow">01 · Choose</p><h2>Food shelf</h2></div>
@@ -246,7 +276,8 @@ export default function App() {
           {!submitted ? <div className="hidden-results"><span className="secret-mark" aria-hidden="true">?</span><h3>{lastChecked ? 'Your meal changed' : 'Keep building'}</h3><p>{lastChecked ? 'Check again to reveal the updated nutrition for your meal.' : 'When you’re ready, check your meal to reveal its energy and macronutrients.'}</p></div> : <div className="results-content">
             <div className="calorie-total"><span>Total energy</span><strong>{rounded(total.calories)}</strong><em>kcal</em></div>
             <MacroBar total={total} />
-            <div className={`verdict ${verdict.tone}`}><span>{verdict.tone === 'balanced' ? '✦' : verdict.tone === 'nearly' ? '↗' : '↺'}</span><div><h3>{verdict.title}</h3><p>{verdict.message}</p></div></div>
+            <NutrientTracker items={plate} totalFat={total.fat} />
+            <div className={`verdict ${verdict.tone}`}><span>{verdict.tone === 'balanced' ? '✦' : verdict.tone === 'nearly' ? '↗' : '↺'}</span><div><h3>{verdict.title}</h3>{verdict.findings.length > 0 && <ul className="verdict-findings">{verdict.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>}<p>{verdict.message}</p></div></div>
             <details className="contributions"><summary>Food contributions and sources</summary><ul>{plate.map((item) => { const itemTotal = multiply(item.food.macros, item.portion.multiplier); return <li key={item.instanceId}><span>{item.food.name} · {item.portion.label}</span><strong>{rounded(itemTotal.calories)} kcal</strong><small>{rounded(itemTotal.carbs)} g carbs · {rounded(itemTotal.protein)} g protein · {rounded(itemTotal.fat)} g fat</small><a href={item.food.source.url} target="_blank" rel="noreferrer">{item.food.source.name} <span aria-hidden="true">↗</span><span className="sr-only"> (opens in a new tab)</span></a></li> })}</ul><p>Sources describe the specific serving used. Values can vary by recipe and preparation.</p></details>
             {previous && <p className="previous-check">Previous check: {rounded(previous.calories)} kcal</p>}
             <button className="retry-button" onClick={() => setSubmitted(false)} type="button">Try adjusting it</button>
